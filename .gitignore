@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+*.pem
+deploy/aws/.state/
+.DS_Store
+npm-debug.log*
