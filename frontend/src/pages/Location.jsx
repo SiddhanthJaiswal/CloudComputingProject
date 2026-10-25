@@ -51,10 +51,11 @@ function ChildLocations() {
 
   const markers = useMemo(() => (children || [])
     .map((c, i) => ({ c, tone: TONES[i % TONES.length] }))
-    .filter(({ c }) => c.location.sharing)
+    .filter(({ c }) => c.location.hasLocation)
     .map(({ c, tone }) => ({
       id: c.studentId, lat: c.location.lat, lng: c.location.lng, accuracy: c.location.accuracy,
-      initials: initials(c), label: `${c.firstName} ${c.lastName}`, tone
+      initials: initials(c), label: `${c.firstName} ${c.lastName} - ${c.location.live ? 'live' : `last seen ${timeAgo(c.location.updatedAt)}`}`,
+      tone, stale: !c.location.live
     })), [children]);
 
   return (
@@ -73,17 +74,18 @@ function ChildLocations() {
         <div className="location-layout">
           <div className="card location-map-card">
             <LiveMap markers={markers} focusId={focusId} onSelect={setFocusId} />
-            {markers.length === 0 && <div className="map-overlay">None of your children are sharing their location right now.</div>}
+            {markers.length === 0 && <div className="map-overlay">None of your children have shared a location yet.</div>}
           </div>
           <div className="location-list">
             {children.map((c, i) => {
-              const sharing = c.location.sharing;
+              const loc = c.location;
+              const pill = loc.live ? ['status-present', 'Live'] : loc.hasLocation ? ['status-late', 'Last known'] : ['status-excused', 'No location yet'];
               return (
                 <button
                   key={c.studentId}
                   className={`card child-loc${focusId === c.studentId ? ' focused' : ''}`}
-                  onClick={() => sharing && setFocusId(c.studentId)}
-                  disabled={!sharing}
+                  onClick={() => loc.hasLocation && setFocusId(c.studentId)}
+                  disabled={!loc.hasLocation}
                 >
                   <span className={`map-marker tone-${TONES[i % TONES.length]}`}>{initials(c)}</span>
                   <span className="child-loc-text">
@@ -91,15 +93,16 @@ function ChildLocations() {
                     <small>{c.className || 'No class'}</small>
                   </span>
                   <span className="child-loc-status">
-                    <span className={`status-pill ${sharing ? 'status-present' : 'status-excused'}`}>{sharing ? 'Sharing' : 'Not sharing'}</span>
-                    <small>{sharing ? `Updated ${timeAgo(c.location.updatedAt)}` : c.location.updatedAt ? `Last seen ${timeAgo(c.location.updatedAt)}` : 'Never shared'}</small>
+                    <span className={`status-pill ${pill[0]}`}>{pill[1]}</span>
+                    <small>{loc.hasLocation ? `Updated ${timeAgo(loc.updatedAt)}` : 'Never shared'}</small>
                   </span>
                 </button>
               );
             })}
             <p className="hint location-note">
-              <Icon name="shield" size={14} /> Locations are shared from your child&apos;s own device while they have ParentPulse open,
-              and only linked parents can see them. Refreshes every 30 seconds.
+              <Icon name="shield" size={14} /> Each child&apos;s location updates from their own device whenever they have ParentPulse
+              open, so you see where they were last, with the time. <strong>Live</strong> means they have it open right now.
+              Only linked parents can see this. Refreshes every 30 seconds.
             </p>
           </div>
         </div>
@@ -109,9 +112,9 @@ function ChildLocations() {
 }
 
 const STATUS_TEXT = {
-  off: 'Location sharing is off.',
+  off: 'Location updates are off. Your parents can still see the last location you shared.',
   starting: 'Waiting for your device to report its location...',
-  on: 'Your parents can see your current location.',
+  on: 'Your location updates while ParentPulse is open. Your parents see where you were last seen.',
   denied: 'Location permission was blocked. Allow location for this site in your browser settings, then try again.',
   unavailable: 'This browser does not support location sharing.',
   error: 'Could not get or send your location. It will keep retrying while sharing is on.'
@@ -131,12 +134,12 @@ function ShareLocation() {
           <p className={status === 'denied' || status === 'error' ? 'share-status warn' : 'share-status'}>{STATUS_TEXT[status]}</p>
           {lastSentAt && active && <p className="muted">Last sent {lastSentAt.toLocaleTimeString()}</p>}
           {active
-            ? <button className="btn-ghost" onClick={stop}>Stop sharing</button>
+            ? <button className="btn-ghost" onClick={stop}>Stop updates</button>
             : <button className="btn-primary" onClick={start}>Start sharing</button>}
           <ul className="share-facts">
             <li>Only your linked parents can see it. Teachers and other students cannot.</li>
-            <li>It is only shared while ParentPulse is open on this device.</li>
-            <li>When you stop, your saved location is deleted.</li>
+            <li>It updates only while ParentPulse is open on this device.</li>
+            <li>When you close the app or stop, your parents keep seeing your last shared location and when it was taken.</li>
           </ul>
         </div>
         <div className="card location-map-card">

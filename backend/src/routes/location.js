@@ -1,15 +1,17 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const { GetCommand, PutCommand, QueryCommand, BatchGetCommand } = require('@aws-sdk/lib-dynamodb');
+const { GetCommand, PutCommand, QueryCommand, BatchGetCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { doc } = require('../db/dynamo');
 const { TABLES } = require('../db/tables');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { getStudentIdForUser } = require('../utils/authz');
 
-// Child location sharing. A student shares their own device's position while
-// they have the app open; only parents linked to that student can see it.
-// Teachers and admins have no access. Only the latest position is stored, and
-// it is deleted as soon as the student stops sharing.
+// Child location sharing. A student's device reports its position while they
+// have the app open; only parents linked to that student can see it (teachers
+// and admins have no access). Only the latest position is stored. It is kept
+// after the app closes or sharing stops, so parents see the last known
+// location with its timestamp; "live" means an update arrived very recently.
+const LIVE_WINDOW_MS = 3 * 60 * 1000;
 const router = express.Router();
 router.use(requireAuth);
 
@@ -33,8 +35,17 @@ async function getLocation(studentId) {
 }
 
 function toPublicLocation(item) {
-  if (!item || !item.sharing) return { sharing: false, updatedAt: item?.updatedAt ?? null };
-  return { sharing: true, lat: item.lat, lng: item.lng, accuracy: item.accuracy ?? null, updatedAt: item.updatedAt };
+  if (!item || !Number.isFinite(item.lat)) return { hasLocation: false, sharing: !!item?.sharing, live: false, updatedAt: null };
+  const live = !!item.sharing && Date.now() - new Date(item.updatedAt).getTime() < LIVE_WINDOW_MS;
+  return {
+    hasLocation: true,
+    sharing: !!item.sharing,
+    live,
+    lat: item.lat,
+    lng: item.lng,
+    accuracy: item.accuracy ?? null,
+    updatedAt: item.updatedAt
+  };
 }
 
 async function requireStudentRecord(req, res) {
@@ -76,13 +87,25 @@ router.put('/me', requireRole('student'), updateLimiter, async (req, res) => {
   res.json({ location: toPublicLocation(item) });
 });
 
-// DELETE /api/location/me - student: stop sharing; the stored position is erased
+// DELETE /api/location/me - student: stop sending updates. The last position
+// (and its timestamp) stays visible to linked parents as the last known location.
 router.delete('/me', requireRole('student'), async (req, res) => {
   const studentId = await requireStudentRecord(req, res);
   if (!studentId) return;
-  const item = { studentId, sharing: false, updatedAt: new Date().toISOString() };
-  await doc.send(new PutCommand({ TableName: TABLES.LOCATIONS, Item: item }));
-  res.json({ location: toPublicLocation(item) });
+  try {
+    const result = await doc.send(new UpdateCommand({
+      TableName: TABLES.LOCATIONS,
+      Key: { studentId },
+      UpdateExpression: 'SET sharing = :f',
+      ConditionExpression: 'attribute_exists(studentId)',
+      ExpressionAttributeValues: { ':f': false },
+      ReturnValues: 'ALL_NEW'
+    }));
+    res.json({ location: toPublicLocation(result.Attributes) });
+  } catch (err) {
+    if (err.name !== 'ConditionalCheckFailedException') throw err;
+    res.json({ location: toPublicLocation(null) });
+  }
 });
 
 // GET /api/location/children - parent: latest location of each linked child

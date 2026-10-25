@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Thin Leaflet wrapper. markers: [{ id, lat, lng, accuracy, initials, label, tone }]
+// Thin Leaflet wrapper. markers: [{ id, lat, lng, accuracy, initials, label, tone, stale }]
 // Markers are HTML (initials avatars) rather than Leaflet's default image pins.
 export default function LiveMap({ markers, focusId, onSelect, height = 440 }) {
   const el = useRef(null);
@@ -34,7 +34,7 @@ export default function LiveMap({ markers, focusId, onSelect, height = 440 }) {
       }
       const icon = L.divIcon({
         className: '',
-        html: `<span class="map-marker tone-${m.tone || 'violet'}${m.id === focusId ? ' focused' : ''}">${escapeHtml(m.initials)}</span>`,
+        html: `<span class="map-marker tone-${m.tone || 'violet'}${m.stale ? ' stale' : ''}${m.id === focusId ? ' focused' : ''}">${escapeHtml(m.initials)}</span>`,
         iconSize: [38, 38],
         iconAnchor: [19, 19]
       });

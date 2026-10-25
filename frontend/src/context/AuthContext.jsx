@@ -56,7 +56,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async (reason = '') => {
     try {
-      // A signed-out student is no longer sharing - erase their last position.
+      // A signed-out student is no longer sending updates (the last position stays visible to parents).
       if (user?.role === 'student') await api.delete('/location/me').catch(() => {});
       await api.logout();
     } catch {

@@ -87,20 +87,22 @@ every route that returns student-linked data — never only in the UI.
 
 ## Child location sharing
 
-Parents can see where their children are on a map (**Location** in the parent
-menu). The position comes from the student's own device: the student turns it on
-under **Location sharing**, the browser asks for permission, and updates are sent
-(at most every 10 s, at least every 60 s, or on a 25 m move) while ParentPulse is
-open on that device. A "Sharing location" indicator stays in the student's top bar.
+Parents see each child's **last known location** on a map (**Location** in the
+parent menu), with the time it was taken. A child marked **Live** has ParentPulse
+open right now. The position comes from the student's own device: the student
+turns it on once under **Location sharing** (the browser asks for permission).
+After that it updates whenever they have ParentPulse open (at most every 10 s, at
+least every 60 s, or on a 25 m move), and a "Sharing location" indicator stays in
+their top bar.
 
 - Only parents linked to the child can see it (`GET /api/location/children`);
   teachers and admins cannot. Only students can write their own location.
-- Only the latest position is stored (`parentpulse_locations_*`, no history), and it
-  is deleted when the student stops sharing or signs out.
-- A website cannot track in the background - continuous tracking would need a
-  native mobile app.
-- `npm run db:seed:locations` adds demo positions around Vellore (tagged
-  `source: 'demo'`); a student's real updates overwrite theirs.
+- Only the latest position is stored (`parentpulse_locations_*`, no history). It is
+  kept when the app closes or the student stops updates, so parents always see
+  where the child was last seen; a website cannot report location in the
+  background, so this is the practical behaviour without a native mobile app.
+- `npm run db:seed:locations` adds demo last-known positions around Vellore
+  (tagged `source: 'demo'`); a student's real updates overwrite theirs.
 
 ## AWS deployment
 

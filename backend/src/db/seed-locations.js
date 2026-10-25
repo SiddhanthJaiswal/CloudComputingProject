@@ -1,16 +1,17 @@
-// Demo positions for the location-sharing feature: gives roughly 80% of the
-// students who have a linked parent a "shared" position within a few km of a
-// school in Vellore, and marks the rest as not sharing, so parent dashboards
-// show both states. Items are tagged source: 'demo'. Real updates from a
-// student's device overwrite their demo row. Safe to re-run.
+// Demo positions for the location-sharing feature: gives roughly 90% of the
+// students who have a linked parent a last known position within a few km of
+// a school in Vellore, last updated between a few minutes and two days ago;
+// the rest have never shared. Items are tagged source: 'demo'. Real updates
+// from a student's device overwrite their demo row. Safe to re-run.
 require('dotenv').config();
-const { PutCommand, ScanCommand } = require('@aws-sdk/lib-dynamodb');
+const { PutCommand, ScanCommand, DeleteCommand } = require('@aws-sdk/lib-dynamodb');
 const { doc } = require('./dynamo');
 const { TABLES, ENV } = require('./tables');
 
 const SCHOOL = { lat: 12.9692, lng: 79.1559 };
 const RADIUS_KM = 4;
-const SHARING_RATIO = 0.8;
+const HAS_LOCATION_RATIO = 0.9;
+const MAX_AGE_MINUTES = 2 * 24 * 60;
 const CONCURRENCY = 20;
 
 function rng(seed) {
@@ -42,15 +43,20 @@ async function run() {
   const studentIds = [...new Set(links.map((l) => l.studentId))].sort();
 
   const now = Date.now();
+  const stale = [];
   const items = studentIds.map((studentId) => {
-    const minutesAgo = Math.floor(random() * 50);
+    // Skewed towards recent: most children were seen within the last few hours.
+    const minutesAgo = 5 + Math.floor(random() ** 3 * MAX_AGE_MINUTES);
     const updatedAt = new Date(now - minutesAgo * 60 * 1000).toISOString();
-    if (random() > SHARING_RATIO) return { studentId, sharing: false, updatedAt, source: 'demo' };
+    if (random() > HAS_LOCATION_RATIO) {
+      stale.push(studentId);
+      return null;
+    }
     const distanceKm = RADIUS_KM * Math.sqrt(random());
     const angle = random() * 2 * Math.PI;
     return {
       studentId,
-      sharing: true,
+      sharing: false,
       lat: Math.round((SCHOOL.lat + (distanceKm / 111) * Math.cos(angle)) * 1e6) / 1e6,
       lng: Math.round((SCHOOL.lng + (distanceKm / (111 * Math.cos(SCHOOL.lat * Math.PI / 180))) * Math.sin(angle)) * 1e6) / 1e6,
       accuracy: 10 + Math.floor(random() * 60),
@@ -59,11 +65,15 @@ async function run() {
     };
   });
 
-  for (let i = 0; i < items.length; i += CONCURRENCY) {
-    await Promise.all(items.slice(i, i + CONCURRENCY).map((Item) => doc.send(new PutCommand({ TableName: TABLES.LOCATIONS, Item }))));
+  const rows = items.filter(Boolean);
+  for (let i = 0; i < rows.length; i += CONCURRENCY) {
+    await Promise.all(rows.slice(i, i + CONCURRENCY).map((Item) => doc.send(new PutCommand({ TableName: TABLES.LOCATIONS, Item }))));
   }
-  const sharing = items.filter((i) => i.sharing).length;
-  console.log(`Demo locations: ${sharing} sharing, ${items.length - sharing} not sharing.`);
+  // Students left without a location should have no demo row from an earlier run.
+  for (let i = 0; i < stale.length; i += CONCURRENCY) {
+    await Promise.all(stale.slice(i, i + CONCURRENCY).map((studentId) => doc.send(new DeleteCommand({ TableName: TABLES.LOCATIONS, Key: { studentId } }))));
+  }
+  console.log(`Demo locations: ${rows.length} with a last known location, ${stale.length} never shared.`);
 }
 
 run().catch((err) => {
