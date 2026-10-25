@@ -6,7 +6,7 @@
 set -euo pipefail
 
 export AWS_PROFILE="${AWS_PROFILE:-default}"
-export REGION="${REGION:-us-east-1}"
+export REGION="${REGION:-ap-south-1}"
 
 export PROJECT_NAME="parentpulse"
 export KEY_NAME="${PROJECT_NAME}-key"

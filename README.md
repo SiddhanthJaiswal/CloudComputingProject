@@ -3,38 +3,30 @@
 A centralized, role-aware school-parent communication platform. Built per the
 Review 1 SRS: Admin / Teacher / Parent / Student roles, RBAC, attendance,
 assignments, announcements, notifications, dashboards, and reports, backed by a
-REST API and PostgreSQL, deployable to AWS.
+REST API and Amazon DynamoDB, deployable to AWS.
 
 ## Stack
 
-- **Backend:** Node.js + Express, PostgreSQL (`pg`), JWT auth, bcrypt password hashing.
+- **Backend:** Node.js + Express, Amazon DynamoDB (AWS SDK v3), JWT auth, bcrypt password hashing.
 - **Frontend:** React (Vite), React Router, plain fetch-based API client.
-- **Deployment:** AWS EC2 (Node + nginx) + RDS PostgreSQL — see [`deploy/aws/README.md`](deploy/aws/README.md).
+- **Deployment:** AWS EC2 (Node + nginx + pm2) + DynamoDB (IAM instance role, no stored keys) — see [`deploy/aws/README.md`](deploy/aws/README.md).
 
 ## Project layout
 
 ```
 backend/     Express REST API (see backend/src/routes for each domain)
 frontend/    React app (role-specific dashboards, matching the Review 1 mockups)
-deploy/aws/  Scripts to provision EC2 + RDS and deploy the app
+deploy/aws/  Scripts to provision EC2 + DynamoDB access and deploy the app
 ```
 
 ## Local development
 
 ### 1. Database
 
-You need a PostgreSQL instance reachable from your machine. Options:
-
-- **Install PostgreSQL locally** (e.g. via the official installer, or
-  `choco install postgresql` on Windows), then create a database:
-  ```bash
-  createdb parentpulse
-  ```
-- **Or run Postgres in Docker**, if you have Docker Desktop:
-  ```bash
-  docker run --name parentpulse-db -e POSTGRES_PASSWORD=postgres \
-    -e POSTGRES_DB=parentpulse -p 5432:5432 -d postgres:16
-  ```
+The app talks to real Amazon DynamoDB (there is no local database to install).
+Point `AWS_PROFILE` and `AWS_REGION` in `backend/.env` at your AWS account; local
+development uses separate `_dev`-suffixed tables (`TABLE_ENV=dev`), so it never
+touches the deployed `_prod` data.
 
 ### 2. Backend
 
@@ -42,7 +34,7 @@ You need a PostgreSQL instance reachable from your machine. Options:
 cd backend
 cp .env.example .env      # edit if your DB credentials differ
 npm install
-npm run db:init           # applies schema.sql
+npm run db:init           # creates the DynamoDB tables if missing
 npm run db:seed           # creates demo admin/teacher/parent/student accounts
 npm run dev                # starts the API on http://localhost:4000
 ```
@@ -86,15 +78,32 @@ The backend routes map directly to the FRs in the SRS:
 | FR-10 Search & Filtering | `/api/users?q=&role=`, `/api/students?classId=` |
 | FR-11 Reports | `/api/reports/student/:id`, `/api/reports/class/:id/summary` |
 | FR-12 Administration | `/api/admin/overview`, `/api/classes`, `/api/subjects` |
-| FR-13 Cloud Data | PostgreSQL, deployed via RDS (see `deploy/aws`) |
+| FR-13 Cloud Data | Amazon DynamoDB, on-demand tables (see `deploy/aws`) |
 | FR-14 CRUD | Throughout all routes, RBAC- and ownership-checked |
 
 Data isolation (parents/teachers/students only see what they're authorized to,
 per SRS §11) is enforced server-side in `backend/src/utils/authz.js` and used by
 every route that returns student-linked data — never only in the UI.
 
+## Child location sharing
+
+Parents can see where their children are on a map (**Location** in the parent
+menu). The position comes from the student's own device: the student turns it on
+under **Location sharing**, the browser asks for permission, and updates are sent
+(at most every 10 s, at least every 60 s, or on a 25 m move) while ParentPulse is
+open on that device. A "Sharing location" indicator stays in the student's top bar.
+
+- Only parents linked to the child can see it (`GET /api/location/children`);
+  teachers and admins cannot. Only students can write their own location.
+- Only the latest position is stored (`parentpulse_locations_*`, no history), and it
+  is deleted when the student stops sharing or signs out.
+- A website cannot track in the background - continuous tracking would need a
+  native mobile app.
+- `npm run db:seed:locations` adds demo positions around Vellore (tagged
+  `source: 'demo'`); a student's real updates overwrite theirs.
+
 ## AWS deployment
 
 See [`deploy/aws/README.md`](deploy/aws/README.md) for step-by-step instructions
-to provision EC2 + RDS and deploy the app, including switching the AWS CLI to a
+to provision EC2 + DynamoDB and deploy the app, including switching the AWS CLI to a
 different account/profile and tearing everything down afterward.

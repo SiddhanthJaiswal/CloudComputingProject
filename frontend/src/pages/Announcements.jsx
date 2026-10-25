@@ -70,16 +70,16 @@ export default function Announcements() {
         </form>
       )}
 
-      <div className="activity-list">
+      <div className="announcement-list">
         {announcements.map((a) => (
           <div key={a.id} className="card">
-            <div className="page-header">
+            <div className="card-header">
               <h3>{a.title}</h3>
               {(user.role === 'admin' || a.createdBy === user.id) && (
-                <button className="link-btn" onClick={() => remove(a.id)}>Delete</button>
+                <button className="link-btn danger" onClick={() => remove(a.id)}>Delete</button>
               )}
             </div>
-            <p className="muted">{a.className || 'School-wide'} — by {a.createdByName} — {new Date(a.createdAt).toLocaleDateString()}</p>
+            <p className="activity-meta"><span className="tag">{a.className || 'School-wide'}</span> by {a.createdByName} · {new Date(a.createdAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</p>
             <p>{a.body}</p>
           </div>
         ))}

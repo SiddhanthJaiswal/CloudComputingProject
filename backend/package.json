@@ -10,7 +10,9 @@
     "db:init": "node src/db/init.js",
     "db:seed": "node src/db/seed.js",
     "db:seed:bulk": "node src/db/seed-bulk.js",
-    "db:seed:activity": "node src/db/seed-activity.js"
+    "db:seed:activity": "node src/db/seed-activity.js",
+    "db:seed:expand": "node src/db/seed-expand.js",
+    "db:seed:locations": "node src/db/seed-locations.js"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.658.1",
@@ -19,6 +21,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "express-rate-limit": "^7.5.1",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0"

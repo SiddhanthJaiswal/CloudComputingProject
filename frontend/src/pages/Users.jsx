@@ -32,7 +32,7 @@ export default function Users() {
     e.preventDefault();
     setError('');
     try {
-      await api.register(form);
+      await api.post('/users', form);
       setForm({ firstName: '', lastName: '', email: '', password: '', role: 'teacher' });
       setShowForm(false);
       load();
@@ -63,11 +63,12 @@ export default function Users() {
           <input placeholder="First name" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
           <input placeholder="Last name" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
           <input type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-          <input type="password" placeholder="Temp password" minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+          <input type="password" autoComplete="new-password" placeholder="Temp password (10+ chars, Aa1)" minLength={10} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
           <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
             <option value="teacher">Teacher</option>
             <option value="parent">Parent</option>
             <option value="student">Student</option>
+            <option value="admin">Admin</option>
           </select>
           <button type="submit">Create</button>
         </form>
@@ -94,7 +95,7 @@ export default function Users() {
                 <td>{u.firstName} {u.lastName}</td>
                 <td>{u.email}</td>
                 <td>{u.role}</td>
-                <td className={u.status === 'active' ? 'status-present' : 'status-absent'}>{u.status}</td>
+                <td><span className={`status-pill status-${u.status}`}>{u.status}</span></td>
                 <td><button className="link-btn" onClick={() => toggleStatus(u)}>{u.status === 'active' ? 'Deactivate' : 'Activate'}</button></td>
               </tr>
             ))}

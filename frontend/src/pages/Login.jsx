@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import AuthShell from '../components/AuthShell';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, notice } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -25,20 +26,22 @@ export default function Login() {
   };
 
   return (
-    <div className="auth-screen">
+    <AuthShell>
       <form className="auth-card" onSubmit={handleSubmit}>
-        <h1>ParentPulse</h1>
-        <p className="auth-subtitle">Sign in to your account</p>
+        <h1>Welcome back</h1>
+        <p className="auth-subtitle">Sign in to continue to your dashboard</p>
+        {notice && !error && <div className="alert info">{notice}</div>}
         {error && <div className="alert error">{error}</div>}
-        <label>Email / Username</label>
-        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <label>Email</label>
+        <input type="email" autoComplete="username" placeholder="you@school.edu" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <label>Password</label>
-        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <button type="submit" disabled={busy}>{busy ? 'Signing in...' : 'Sign In'}</button>
+        <input type="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <button type="submit" disabled={busy}>{busy ? 'Signing in...' : 'Sign in'}</button>
+
         <p className="auth-footer">
-          No account? <Link to="/register">Register</Link>
+          No account? <Link to="/register">Create one</Link>
         </p>
       </form>
-    </div>
+    </AuthShell>
   );
 }

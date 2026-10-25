@@ -1,9 +1,14 @@
 const express = require('express');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
-const { GetCommand, ScanCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
+const { GetCommand, PutCommand, QueryCommand, ScanCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb');
 const { doc } = require('../db/dynamo');
 const { TABLES } = require('../db/tables');
 const { requireAuth, requireRole } = require('../middleware/auth');
+const { passwordPolicyError } = require('../utils/password');
+const { startSession } = require('../utils/session');
+
+const ROLES = ['admin', 'teacher', 'parent', 'student'];
 
 const router = express.Router();
 router.use(requireAuth);
@@ -31,6 +36,43 @@ router.get('/', requireRole('admin'), async (req, res) => {
 
   users.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   res.json({ users: users.map(toPublicUser) });
+});
+
+// POST /api/users - admin only, creates an account of any role. (Admins must
+// not use /api/auth/register for this: that endpoint signs in as the new user.)
+router.post('/', requireRole('admin'), async (req, res) => {
+  const { email, password, role, firstName, lastName } = req.body;
+  if (!email || !password || !role || !firstName || !lastName) {
+    return res.status(400).json({ error: 'email, password, role, firstName, lastName are required' });
+  }
+  if (!ROLES.includes(role)) return res.status(400).json({ error: `role must be one of: ${ROLES.join(', ')}` });
+  const policyError = passwordPolicyError(password);
+  if (policyError) return res.status(400).json({ error: policyError });
+
+  const normalizedEmail = String(email).toLowerCase();
+  const existing = await doc.send(new QueryCommand({
+    TableName: TABLES.USERS,
+    IndexName: 'email-index',
+    KeyConditionExpression: 'email = :e',
+    ExpressionAttributeValues: { ':e': normalizedEmail }
+  }));
+  if (existing.Items?.length) return res.status(409).json({ error: 'An account with this email already exists' });
+
+  const now = new Date().toISOString();
+  const user = {
+    id: crypto.randomUUID(),
+    email: normalizedEmail,
+    passwordHash: await bcrypt.hash(password, 10),
+    role,
+    firstName,
+    lastName,
+    status: 'active',
+    tokenVersion: 0,
+    createdAt: now,
+    updatedAt: now
+  };
+  await doc.send(new PutCommand({ TableName: TABLES.USERS, Item: user, ConditionExpression: 'attribute_not_exists(id)' }));
+  res.status(201).json({ user: toPublicUser(user) });
 });
 
 // GET /api/users/:id - admin or self
@@ -61,11 +103,19 @@ router.put('/:id', async (req, res) => {
   if (firstName) { names['#firstName'] = 'firstName'; values[':firstName'] = firstName; sets.push('#firstName = :firstName'); }
   if (lastName) { names['#lastName'] = 'lastName'; values[':lastName'] = lastName; sets.push('#lastName = :lastName'); }
   if (password) {
-    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+    const policyError = passwordPolicyError(password);
+    if (policyError) return res.status(400).json({ error: policyError });
     values[':passwordHash'] = await bcrypt.hash(password, 10);
     sets.push('passwordHash = :passwordHash');
+    // Signs the account out everywhere; the caller gets a fresh session below if editing themselves.
+    values[':zero'] = 0;
+    values[':one'] = 1;
+    sets.push('tokenVersion = if_not_exists(tokenVersion, :zero) + :one');
   }
   if (status && isAdmin) {
+    if (isSelf && status !== 'active') {
+      return res.status(400).json({ error: 'You cannot deactivate your own account' });
+    }
     if (!['active', 'inactive'].includes(status)) {
       return res.status(400).json({ error: 'status must be active or inactive' });
     }
@@ -91,6 +141,7 @@ router.put('/:id', async (req, res) => {
       ConditionExpression: 'attribute_exists(id)',
       ReturnValues: 'ALL_NEW'
     }));
+    if (password && isSelf) startSession(res, result.Attributes, req.session.authTime);
     res.json({ user: toPublicUser(result.Attributes) });
   } catch (err) {
     if (err.name === 'ConditionalCheckFailedException') return res.status(404).json({ error: 'User not found' });

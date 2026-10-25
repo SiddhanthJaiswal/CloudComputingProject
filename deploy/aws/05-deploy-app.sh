@@ -21,24 +21,6 @@ if [ ! -f "$STATE_DIR/iam_profile_name" ]; then
   exit 1
 fi
 
-# Home/mobile ISPs commonly rotate the public IP between a small pool of
-# addresses, which silently locks SSH out (the security group only allows the
-# IP it was last set to). Refresh it to the current IP before every deploy so
-# this doesn't have to be fixed by hand each time.
-APP_SG_ID=$(cat "$STATE_DIR/app_sg_id" 2>/dev/null || echo "")
-if [ -n "$APP_SG_ID" ]; then
-  CURRENT_IP=$(curl -s https://checkip.amazonaws.com)/32
-  EXISTING_SSH_CIDR=$(aws_cli ec2 describe-security-groups --group-ids "$APP_SG_ID" \
-    --query 'SecurityGroups[0].IpPermissions[?FromPort==`22`].IpRanges[0].CidrIp' --output text 2>/dev/null || echo "")
-  if [ -n "$CURRENT_IP" ] && [ "$CURRENT_IP" != "$EXISTING_SSH_CIDR" ]; then
-    echo "==> Your public IP changed ($EXISTING_SSH_CIDR -> $CURRENT_IP) - updating the SSH security group rule..."
-    [ -n "$EXISTING_SSH_CIDR" ] && aws_cli ec2 revoke-security-group-ingress --group-id "$APP_SG_ID" \
-      --protocol tcp --port 22 --cidr "$EXISTING_SSH_CIDR" >/dev/null 2>&1 || true
-    aws_cli ec2 authorize-security-group-ingress --group-id "$APP_SG_ID" \
-      --protocol tcp --port 22 --cidr "$CURRENT_IP" >/dev/null
-  fi
-fi
-
 # Persist a JWT secret across redeploys instead of generating a new one each time.
 JWT_SECRET_FILE="$STATE_DIR/jwt_secret"
 if [ ! -f "$JWT_SECRET_FILE" ]; then
@@ -47,10 +29,12 @@ fi
 JWT_SECRET=$(cat "$JWT_SECRET_FILE")
 
 CLOUDFRONT_DOMAIN=$(cat "$STATE_DIR/cloudfront_domain" 2>/dev/null || echo "")
-CORS_ORIGINS="http://$PUBLIC_IP"
-if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-  CORS_ORIGINS="$CORS_ORIGINS,https://$CLOUDFRONT_DOMAIN"
+ORIGIN_SECRET=$(cat "$STATE_DIR/origin_secret" 2>/dev/null || echo "")
+if [ -z "$CLOUDFRONT_DOMAIN" ] || [ -z "$ORIGIN_SECRET" ]; then
+  echo "Run 06-create-cloudfront.sh first: the app is only served over HTTPS via CloudFront." >&2
+  exit 1
 fi
+CORS_ORIGINS="https://$CLOUDFRONT_DOMAIN"
 
 ROOT_DIR="$(cd "$DEPLOY_DIR/../.." && pwd)"
 BUILD_DIR="$STATE_DIR/build"
@@ -68,6 +52,7 @@ echo "==> Building frontend..."
   npm run build
 )
 cp -r "$ROOT_DIR/frontend/dist" "$BUILD_DIR/frontend/dist"
+sed "s/__ORIGIN_SECRET__/$ORIGIN_SECRET/" "$DEPLOY_DIR/nginx-parentpulse.conf" > "$BUILD_DIR/parentpulse.conf"
 
 echo "==> Packaging backend (excluding node_modules)..."
 cp -r "$ROOT_DIR/backend/src" "$BUILD_DIR/backend/src"
@@ -80,33 +65,54 @@ NODE_ENV=production
 AWS_REGION=$REGION
 TABLE_ENV=$TABLE_ENV
 JWT_SECRET=$JWT_SECRET
-JWT_EXPIRES_IN=8h
+SESSION_IDLE_MINUTES=15
+SESSION_MAX_HOURS=8
+TRUST_PROXY_HOPS=2
 CORS_ORIGINS=$CORS_ORIGINS
 EOF
 
-SSH_OPTS="-i $PEM_PATH -o StrictHostKeyChecking=accept-new"
+# SSH goes through the EC2 Instance Connect Endpoint (08-ssh-via-instance-connect.sh):
+# no public SSH port, and it works from any network regardless of your IP.
+INSTANCE_ID=$(cat "$STATE_DIR/instance_id")
+if [ ! -f "$STATE_DIR/eice_id" ]; then
+  echo "Run 08-ssh-via-instance-connect.sh first (SSH is only reachable through the endpoint)." >&2
+  exit 1
+fi
+SSH_OPTS="-i $PEM_PATH -o StrictHostKeyChecking=accept-new -o ProxyCommand='aws ec2-instance-connect open-tunnel --instance-id $INSTANCE_ID --region $REGION --profile $AWS_PROFILE'"
+ssh_cmd() { eval ssh "$SSH_OPTS" "$@"; }
 
-echo "==> Waiting for SSH to be ready on $PUBLIC_IP..."
+echo "==> Waiting for SSH to be ready on $INSTANCE_ID..."
 for i in $(seq 1 20); do
-  if ssh $SSH_OPTS "ec2-user@$PUBLIC_IP" 'echo ok' >/dev/null 2>&1; then break; fi
+  if ssh_cmd "ec2-user@$INSTANCE_ID" "'echo ok'" >/dev/null 2>&1; then break; fi
   sleep 5
 done
 
 echo "==> Uploading application files..."
-ssh $SSH_OPTS "ec2-user@$PUBLIC_IP" 'rm -rf /opt/parentpulse/backend/src /opt/parentpulse/frontend/dist'
-scp -r $SSH_OPTS "$BUILD_DIR/backend/." "ec2-user@$PUBLIC_IP:/opt/parentpulse/backend/"
-scp -r $SSH_OPTS "$BUILD_DIR/frontend/." "ec2-user@$PUBLIC_IP:/opt/parentpulse/frontend/"
-scp $SSH_OPTS "$DEPLOY_DIR/nginx-parentpulse.conf" "ec2-user@$PUBLIC_IP:/tmp/parentpulse.conf"
+# One tar stream into a staging dir (scp over the Instance Connect tunnel can
+# hang). Nothing live is touched until the upload has fully arrived.
+cp "$DEPLOY_DIR/nginx-security-headers.conf" "$BUILD_DIR/parentpulse-security-headers.conf"
+tar -C "$BUILD_DIR" -cf - backend frontend parentpulse.conf parentpulse-security-headers.conf   | ssh_cmd "ec2-user@$INSTANCE_ID" "'rm -rf /tmp/ppdeploy && mkdir -p /tmp/ppdeploy && tar -C /tmp/ppdeploy -xf -'"
 
 echo "==> Installing dependencies, creating DynamoDB tables, and starting the app on the server..."
-ssh $SSH_OPTS "ec2-user@$PUBLIC_IP" bash -s <<'REMOTE'
+ssh_cmd "ec2-user@$INSTANCE_ID" bash -s <<'REMOTE'
 set -euo pipefail
+STAGE=/tmp/ppdeploy
+test -f "$STAGE/frontend/dist/index.html" && test -f "$STAGE/backend/src/index.js"
+
+# Swap code into place (node_modules is kept and updated below).
+rm -rf /opt/parentpulse/backend/src /opt/parentpulse/frontend/dist
+cp -r "$STAGE/backend/." /opt/parentpulse/backend/
+cp -r "$STAGE/frontend/." /opt/parentpulse/frontend/
+
 cd /opt/parentpulse/backend
-npm install --omit=dev
+chmod 600 .env
+npm install --omit=dev --no-audit --no-fund
 node src/db/init.js
 node src/db/seed.js || true
 
-sudo cp /tmp/parentpulse.conf /etc/nginx/conf.d/parentpulse.conf
+sudo cp "$STAGE/parentpulse-security-headers.conf" /etc/nginx/parentpulse-security-headers.conf
+sudo install -m 640 -o root -g nginx "$STAGE/parentpulse.conf" /etc/nginx/conf.d/parentpulse.conf
+rm -rf "$STAGE"
 sudo nginx -t
 sudo systemctl reload nginx
 
@@ -124,8 +130,4 @@ fi
 
 echo ""
 echo "Deployment complete."
-echo "App URL: http://$PUBLIC_IP"
-if [ -n "$CLOUDFRONT_DOMAIN" ]; then
-  echo "CDN URL (HTTPS): https://$CLOUDFRONT_DOMAIN"
-fi
-echo "Demo logins: admin@parentpulse.local / Admin@123 (see backend/src/db/seed.js for the rest)"
+echo "App URL: https://$CLOUDFRONT_DOMAIN"

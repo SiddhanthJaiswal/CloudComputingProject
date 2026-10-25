@@ -17,7 +17,8 @@ const TABLES = {
   ASSIGNMENTS: tableName('assignments'),
   ATTENDANCE: tableName('attendance'),
   ANNOUNCEMENTS: tableName('announcements'),
-  NOTIFICATIONS: tableName('notifications')
+  NOTIFICATIONS: tableName('notifications'),
+  LOCATIONS: tableName('locations')
 };
 
 // Definitions used only by db/init.js to create tables (CreateTableCommand).
@@ -164,6 +165,13 @@ const TABLE_DEFINITIONS = [
       { AttributeName: 'userId', AttributeType: 'S' },
       { AttributeName: 'sortKey', AttributeType: 'S' }
     ],
+    BillingMode: 'PAY_PER_REQUEST'
+  },
+  {
+    // Latest shared position per student only - no movement history is kept.
+    TableName: TABLES.LOCATIONS,
+    KeySchema: [{ AttributeName: 'studentId', KeyType: 'HASH' }],
+    AttributeDefinitions: [{ AttributeName: 'studentId', AttributeType: 'S' }],
     BillingMode: 'PAY_PER_REQUEST'
   }
 ];

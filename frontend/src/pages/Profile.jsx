@@ -41,7 +41,8 @@ export default function Profile() {
         <label>Last name</label>
         <input value={lastName} onChange={(e) => setLastName(e.target.value)} required />
         <label>New password (optional)</label>
-        <input type="password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep current password" />
+        <input type="password" autoComplete="new-password" minLength={10} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank to keep current password" />
+        <p className="hint">At least 10 characters, with an uppercase letter, a lowercase letter and a number. Changing it signs you out on all other devices.</p>
         <button type="submit">Save changes</button>
       </form>
     </div>

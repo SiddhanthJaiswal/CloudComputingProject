@@ -73,15 +73,26 @@ function MarkAttendance() {
                   <tr key={s.id}>
                     <td>{s.firstName} {s.lastName}</td>
                     <td>
-                      <select value={statuses[s.id]} onChange={(e) => setStatuses({ ...statuses, [s.id]: e.target.value })}>
-                        {STATUS_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-                      </select>
+                      <div className="segmented" role="radiogroup">
+                        {STATUS_OPTIONS.map((opt) => (
+                          <button
+                            type="button"
+                            key={opt}
+                            role="radio"
+                            aria-checked={statuses[s.id] === opt}
+                            className={statuses[s.id] === opt ? `active seg-${opt}` : ''}
+                            onClick={() => setStatuses({ ...statuses, [s.id]: opt })}
+                          >
+                            {opt}
+                          </button>
+                        ))}
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <button type="submit">Save Attendance</button>
+            <div className="form-actions"><button type="submit" className="btn-primary">Save attendance</button></div>
           </form>
         )}
       </div>
@@ -146,7 +157,7 @@ function ViewAttendance() {
           <thead><tr><th>Date</th><th>Status</th></tr></thead>
           <tbody>
             {records.map((r) => (
-              <tr key={r.id}><td>{new Date(r.date).toLocaleDateString()}</td><td className={`status-${r.status}`}>{r.status}</td></tr>
+              <tr key={r.id}><td>{new Date(r.date).toLocaleDateString()}</td><td><span className={`status-pill status-${r.status}`}>{r.status}</span></td></tr>
             ))}
             {records.length === 0 && <tr><td colSpan={2} className="muted">No attendance records yet.</td></tr>}
           </tbody>

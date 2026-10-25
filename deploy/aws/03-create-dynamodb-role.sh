@@ -62,6 +62,11 @@ else
   sleep 10
 fi
 
+# Record the profile before the instance check, so 04-create-ec2.sh can attach
+# it at launch when this script runs first.
+echo "$ROLE_NAME" > "$STATE_DIR/iam_role_name"
+echo "$PROFILE_NAME" > "$STATE_DIR/iam_profile_name"
+
 INSTANCE_ID=$(cat "$STATE_DIR/instance_id" 2>/dev/null || echo "")
 if [ -z "$INSTANCE_ID" ]; then
   echo "No instance_id found in $STATE_DIR - run 04-create-ec2.sh first, or associate the profile manually later."
@@ -81,6 +86,4 @@ else
   echo "Associated instance profile $PROFILE_NAME with instance $INSTANCE_ID."
 fi
 
-echo "$ROLE_NAME" > "$STATE_DIR/iam_role_name"
-echo "$PROFILE_NAME" > "$STATE_DIR/iam_profile_name"
 echo "Done. The EC2 instance can now access DynamoDB tables prefixed '${PROJECT_NAME}_' without any access keys."

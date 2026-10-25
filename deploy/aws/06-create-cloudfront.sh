@@ -44,6 +44,12 @@ else
     exit 1
   fi
 
+  # Shared secret CloudFront adds to every origin request; nginx rejects
+  # requests without it, so the EC2 instance can't be reached around CloudFront.
+  ORIGIN_SECRET_FILE="$STATE_DIR/origin_secret"
+  [ -f "$ORIGIN_SECRET_FILE" ] || openssl rand -hex 24 > "$ORIGIN_SECRET_FILE"
+  ORIGIN_SECRET=$(cat "$ORIGIN_SECRET_FILE")
+
   CALLER_REF="${PROJECT_NAME}-$(date +%s)"
 
   CONFIG=$(cat <<JSON
@@ -58,6 +64,10 @@ else
     "Items": [{
       "Id": "ec2-origin",
       "DomainName": "$EC2_DNS",
+      "CustomHeaders": {
+        "Quantity": 1,
+        "Items": [{ "HeaderName": "X-Origin-Verify", "HeaderValue": "$ORIGIN_SECRET" }]
+      },
       "CustomOriginConfig": {
         "HTTPPort": 80,
         "HTTPSPort": 443,
@@ -121,4 +131,5 @@ echo "CloudFront distribution is live."
 echo "  Distribution ID: $DIST_ID"
 echo "  URL: https://$DIST_DOMAIN"
 echo ""
-echo "Next: re-run 05-deploy-app.sh so the backend's CORS_ORIGINS includes this domain."
+echo "Next: re-run 05-deploy-app.sh (enables the origin check + CORS for this domain),"
+echo "then 07-restrict-origin.sh to close direct HTTP access to the instance."

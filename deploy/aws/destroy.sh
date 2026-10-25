@@ -11,7 +11,7 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/00-config.sh"
 
 echo "This will PERMANENTLY delete the ParentPulse EC2 instance, CloudFront distribution,"
-echo "IAM role/instance profile, security group and key pair under AWS profile '$AWS_PROFILE' in region '$REGION'."
+echo "IAM role/instance profile, Instance Connect Endpoint, security groups and key pair under AWS profile '$AWS_PROFILE' in region '$REGION'."
 read -r -p "Type 'destroy' to confirm: " CONFIRM
 if [ "$CONFIRM" != "destroy" ]; then
   echo "Aborted."
@@ -54,14 +54,29 @@ if aws_cli iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
   echo "Deleted IAM role: $ROLE_NAME"
 fi
 
+EICE_ID=$(cat "$STATE_DIR/eice_id" 2>/dev/null || echo "")
+if [ -n "$EICE_ID" ]; then
+  aws_cli ec2 delete-instance-connect-endpoint --instance-connect-endpoint-id "$EICE_ID" >/dev/null 2>&1 || true
+  echo "Deleting Instance Connect Endpoint $EICE_ID..."
+  while [ "$(aws_cli ec2 describe-instance-connect-endpoints --instance-connect-endpoint-ids "$EICE_ID"     --query 'InstanceConnectEndpoints[0].State' --output text 2>/dev/null || echo delete-complete)" != "delete-complete" ]; do
+    sleep 10
+  done
+fi
+
 APP_SG_ID=$(cat "$STATE_DIR/app_sg_id" 2>/dev/null || echo "")
+EICE_SG_ID=$(cat "$STATE_DIR/eice_sg_id" 2>/dev/null || echo "")
+if [ -n "$EICE_SG_ID" ]; then
+  # The two groups reference each other, so drop those rules before deleting either.
+  [ -n "$APP_SG_ID" ] && aws_cli ec2 revoke-security-group-ingress --group-id "$APP_SG_ID"     --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,UserIdGroupPairs=[{GroupId=$EICE_SG_ID}]" >/dev/null 2>&1 || true
+  aws_cli ec2 delete-security-group --group-id "$EICE_SG_ID" 2>/dev/null || true
+fi
 [ -n "$APP_SG_ID" ] && aws_cli ec2 delete-security-group --group-id "$APP_SG_ID" 2>/dev/null || true
 
 aws_cli ec2 delete-key-pair --key-name "$KEY_NAME" 2>/dev/null || true
 
 rm -f "$STATE_DIR"/instance_id "$STATE_DIR"/public_ip "$STATE_DIR"/app_sg_id "$STATE_DIR"/vpc_id \
       "$STATE_DIR"/iam_role_name "$STATE_DIR"/iam_profile_name \
-      "$STATE_DIR"/cloudfront_distribution_id "$STATE_DIR"/cloudfront_domain
+      "$STATE_DIR"/cloudfront_distribution_id "$STATE_DIR"/cloudfront_domain       "$STATE_DIR"/origin_secret "$STATE_DIR"/eice_id "$STATE_DIR"/eice_sg_id
 
 echo ""
 echo "EC2/CloudFront/IAM/network resources removed."

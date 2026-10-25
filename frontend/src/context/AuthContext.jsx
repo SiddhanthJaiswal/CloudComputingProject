@@ -1,24 +1,23 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { api } from '../api/client';
+import { api, SESSION_ENDED_EVENT } from '../api/client';
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Shown on the sign-in screen after an automatic sign-out.
+  const [notice, setNotice] = useState('');
 
   const loadMe = useCallback(async () => {
-    const token = localStorage.getItem('pp_token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
     try {
       const data = await api.get('/auth/me');
       setUser(data.user);
+      setSession(data.session);
     } catch {
-      localStorage.removeItem('pp_token');
       setUser(null);
+      setSession(null);
     } finally {
       setLoading(false);
     }
@@ -28,27 +27,48 @@ export function AuthProvider({ children }) {
     loadMe();
   }, [loadMe]);
 
+  useEffect(() => {
+    const onEnded = (e) => {
+      setUser(null);
+      setSession(null);
+      setNotice(e.detail || 'Your session has ended. Please sign in again.');
+    };
+    window.addEventListener(SESSION_ENDED_EVENT, onEnded);
+    return () => window.removeEventListener(SESSION_ENDED_EVENT, onEnded);
+  }, []);
+
   const login = async (email, password) => {
     const data = await api.login(email, password);
-    localStorage.setItem('pp_token', data.token);
+    setNotice('');
     setUser(data.user);
+    setSession(data.session);
     return data.user;
   };
 
   const register = async (payload) => {
     const data = await api.register(payload);
-    localStorage.setItem('pp_token', data.token);
+    if (data.pending) return data;
+    setNotice('');
     setUser(data.user);
-    return data.user;
+    setSession(data.session);
+    return data;
   };
 
-  const logout = () => {
-    localStorage.removeItem('pp_token');
+  const logout = useCallback(async (reason = '') => {
+    try {
+      // A signed-out student is no longer sharing - erase their last position.
+      if (user?.role === 'student') await api.delete('/location/me').catch(() => {});
+      await api.logout();
+    } catch {
+      // already signed out server-side
+    }
     setUser(null);
-  };
+    setSession(null);
+    setNotice(reason);
+  }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refresh: loadMe }}>
+    <AuthContext.Provider value={{ user, session, loading, notice, login, register, logout, refresh: loadMe }}>
       {children}
     </AuthContext.Provider>
   );

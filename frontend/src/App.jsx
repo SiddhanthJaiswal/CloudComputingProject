@@ -13,6 +13,7 @@ import Announcements from './pages/Announcements';
 import Reports from './pages/Reports';
 import Users from './pages/Users';
 import Profile from './pages/Profile';
+import Location from './pages/Location';
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -32,6 +33,7 @@ export default function App() {
       <Route path="/announcements" element={<PrivateRoute><Announcements /></PrivateRoute>} />
       <Route path="/reports" element={<PrivateRoute><Reports /></PrivateRoute>} />
       <Route path="/users" element={<PrivateRoute roles={['admin']}><Users /></PrivateRoute>} />
+      <Route path="/location" element={<PrivateRoute roles={['parent', 'student']}><Location /></PrivateRoute>} />
       <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
 
       <Route path="/" element={<Navigate to={user ? '/dashboard' : '/login'} replace />} />
